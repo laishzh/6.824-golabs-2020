@@ -362,10 +362,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			DPrintf("[%d]timer timeout!", rf.me)
 
 			rf.mu.Lock()
-			rf.state = Candidate
-			rf.currentTerm++
-			rf.mu.Unlock()
-			rf.StartElection()
+			if rf.state == Follower {
+				rf.state = Candidate
+				rf.currentTerm++
+				rf.mu.Unlock()
+				rf.StartElection()
+			} else {
+				rf.mu.Unlock()
+			}
 			rf.ResetElectionTimeout()
 
 		}
