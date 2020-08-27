@@ -43,6 +43,13 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+type RaftState int
+const (
+	Follower RaftState = 0
+	Candidate = 1
+	Leader = 2
+)
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -56,6 +63,9 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	state RaftState
+	currentTerm int
+	voteFor int
 
 }
 
@@ -66,6 +76,13 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	term = rf.currentTerm
+	if rf.state == Leader {
+		isleader = true
+	} else {
+		isleader = false
+	}
+
 	return term, isleader
 }
 
@@ -234,6 +251,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+
+	rf.state = Follower
+	rf.currentTerm = 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
