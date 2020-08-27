@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,8 +79,6 @@ type Raft struct {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	DPrintf("[%d]GetState", rf.me)
-
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	var term int
@@ -98,6 +97,7 @@ func (rf *Raft) GetState() (int, bool) {
 		isleader = false
 	}
 
+	DPrintf("[%d]GetState, term: %d, isleader: %v", rf.me, term, isleader)
 	return term, isleader
 }
 
@@ -173,11 +173,17 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
 	DPrintf("[%d]Received VoteReq from [%d], curTerm(%d) vs candTerm(%d)", rf.me, args.CandidateID, rf.currentTerm, args.Term)
-	reply.Term = rf.currentTerm
+	myTerm := rf.currentTerm
+	reply.Term = myTerm
 	reply.VoteGranted = false
-	if args.Term > rf.currentTerm {
+	if args.Term > myTerm {
+		rf.mu.Lock()
 		rf.state = Follower
+		rf.currentTerm = args.Term
+		rf.mu.Unlock()
+		rf.ResetElectionTimeout()
 		reply.VoteGranted = true
+
 	}
 
 	if reply.VoteGranted {
@@ -219,7 +225,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	DPrintf("[%d]sendRequestVote", rf.me)
+	DPrintf("[%d]sendRequestVote to [%d]", rf.me, server)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
@@ -272,6 +278,8 @@ func (rf *Raft) killed() bool {
 
 // StartElection
 func (rf *Raft) StartElection() {
+	DPrintf("[%d]Start an election.", rf.me)
+	defer DPrintf("[%d]Election ends.", rf.me)
 	rf.mu.Lock()
 	voteArgs := RequestVoteArgs{
 		Term:        rf.currentTerm,
@@ -293,17 +301,30 @@ func (rf *Raft) StartElection() {
 			if voteReply.VoteGranted {
 				voteGranted++
 			}
+		} else {
+			DPrintf("[%d]fail to get resp from [%d]", rf.me, i)
 		}
-		if voteGranted >= (total+1)/2 {
-			break
-		}
+		// if voteGranted >= total/2 {
+		// 	DPrintf("[%d]Got %d/%d votes, break", rf.me, voteGranted+1, total)
+		// 	break
+		// }
 	}
 
-	if voteGranted >= (total+1)/2 {
+	if voteGranted >= total/2 {
 		rf.mu.Lock()
 		rf.state = Leader
 		rf.mu.Unlock()
+		DPrintf("[%d]become leader", rf.me)
 	}
+}
+
+func (rf *Raft) ResetElectionTimeout() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rd := rand.Intn(150) + 150
+	rf.timer.Reset(time.Duration(rd) * time.Millisecond)
+	DPrintf("[%d]ResetTimtout %d ms", rf.me, rd)
+
 }
 
 //
@@ -326,24 +347,27 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Your initialization code here (2A, 2B, 2C).
 
+	rand.Seed(time.Now().UnixNano())
+
 	rf.state = Follower
 	rf.currentTerm = 0
 
-	d := time.Duration(200 * time.Millisecond)
+	rd := 150 + rand.Intn(150)
+	d := time.Duration(time.Duration(rd) * time.Millisecond)
 	rf.timer = time.NewTimer(d)
 
 	go func(rf *Raft) {
 		for {
 			<-rf.timer.C
-			DPrintf("timeout!")
+			DPrintf("[%d]timer timeout!", rf.me)
 
 			rf.mu.Lock()
 			rf.state = Candidate
 			rf.currentTerm++
 			rf.mu.Unlock()
 			rf.StartElection()
+			rf.ResetElectionTimeout()
 
-			rf.timer.Reset(d)
 		}
 	}(rf)
 
